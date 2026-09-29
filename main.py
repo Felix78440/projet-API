@@ -14,6 +14,7 @@ accounts = {
     2: Account(name="Bob", solde=500.0),
 }
 
+dépot = []
 #Get
 
 @app.get("/account/{account_id}")
@@ -33,3 +34,12 @@ def envoie(account_id1: int, account_id2: int, amount: float):
             return {"message": f"Transferred {amount} from {acc1.name} to {acc2.name}", "account1_solde": acc1.solde, "account2_solde": acc2.solde}
         return {"message": "Insufficient funds"}
     return {"message": "Invalid account(s) or amount"}
+
+@app.post("/account/deposit/")
+def depot(account_id: int, amount: float):
+    acc = accounts.get(account_id)
+    if acc and amount > 0:
+        acc.solde += amount
+        dépot.append({"account_id": account_id, "amount": amount})
+        return {"message": f"Deposited {amount} to {acc.name}'s account", "new_solde": acc.solde, "depot_history": dépot}
+    return {"message": "Invalid account or amount"}
