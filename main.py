@@ -26,9 +26,10 @@ def get_account(account_id: int):
 def envoie(account_id1: int, account_id2: int, amount: float):
     acc1 = accounts.get(account_id1)
     acc2 = accounts.get(account_id2)
-    if acc1 and acc2:
+    if acc1 and acc2 and acc1 != acc2 and amount > 0:
         if acc1.solde >= amount:
             acc1.solde -= amount
             acc2.solde += amount
             return {"message": f"Transferred {amount} from {acc1.name} to {acc2.name}", "account1_solde": acc1.solde, "account2_solde": acc2.solde}
-    return {"message": "Insufficient funds"}
+        return {"message": "Insufficient funds"}
+    return {"message": "Invalid account(s) or amount"}
