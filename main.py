@@ -8,6 +8,7 @@ app = FastAPI()
 class Account(BaseModel):
     name: str
     solde: float
+    transactions: list = []
 
 accounts = {
     1: Account(name="Alice", solde=1000.0),
@@ -31,7 +32,9 @@ def envoie(account_id1: int, account_id2: int, amount: float):
         if acc1.solde >= amount:
             acc1.solde -= amount
             acc2.solde += amount
-            return {"message": f"Transferred {amount} from {acc1.name} to {acc2.name}", "account1_solde": acc1.solde, "account2_solde": acc2.solde}
+            acc1.transactions.append({"to": acc2.name, "amount": amount})
+            acc2.transactions.append({"from": acc1.name, "amount": amount})
+            return {"message": f"Transferred {amount} from {acc1.name} to {acc2.name}", "account1_solde": acc1.solde, "account2_solde": acc2.solde, "account1_transactions": acc1.transactions, "account2_transactions": acc2.transactions}
         return {"message": "Insufficient funds"}
     return {"message": "Invalid account(s) or amount"}
 
