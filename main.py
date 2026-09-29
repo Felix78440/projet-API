@@ -1,5 +1,4 @@
 from sqlite3.dbapi2 import Timestamp
-
 from fastapi import FastAPI
 from pydantic import BaseModel
 from datetime import datetime
@@ -25,8 +24,10 @@ dépot = []
 
 @app.get("/account/{account_id}")
 def get_account(account_id: int):
-    return accounts.get(account_id)
-
+    account = accounts.get(account_id)
+    if account:
+        return {"name": account.name, "solde": account.solde}
+    return {"message": "Account not found"}
 #Post
 
 @app.post("/account/transfer/")
