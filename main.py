@@ -39,9 +39,9 @@ def get_all_account_transactions(account_id: int):
             t_list = []
             for k, t in account_transactions:
                 if t["id1"] == account_id:
-                    t_list.append({"transaction_id": k, "type": "debit", "receiver_id": t["id2"], "receiver_name": accounts[t["id2"]].name if t["id2"] in accounts else None, "amount": t["amount"], "timestamp": t["timestamp"]})
+                    t_list.insert(0, {"transaction_id": k, "type": "debit", "receiver_id": t["id2"], "receiver_name": accounts[t["id2"]].name if t["id2"] in accounts else None, "amount": t["amount"], "timestamp": t["timestamp"]})
                 else:
-                    t_list.append({"transaction_id": k, "type": "credit", "sender_id": t["id1"], "sender_name": accounts[t["id1"]].name if t["id1"] in accounts else None, "amount": t["amount"], "timestamp": t["timestamp"]})
+                    t_list.insert(0, {"transaction_id": k, "type": "credit", "sender_id": t["id1"], "sender_name": accounts[t["id1"]].name if t["id1"] in accounts else None, "amount": t["amount"], "timestamp": t["timestamp"]})
             return {"transactions": t_list}
         return {"message": "No transactions found for this account"}
     return {"message": "Account not found"}
