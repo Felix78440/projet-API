@@ -5,15 +5,51 @@ from datetime import datetime, timedelta
 import uuid
 import time
 import threading
+from peewee import *
 
-app = FastAPI()
+# --- Configuration de la base de données ---
+db = SqliteDatabase('bdd.db')  # Fichier SQLite
 
-#Class
+# --- Modèles Peewee (NE PAS CONFONDRE AVEC pydantic.BaseModel) ---
+class BaseModelPeewee(Model):
+    class Meta:
+        database = db
 
-class Account(BaseModel):
-    id: int
-    name: str
-    solde: float
+# Modèle pour les comptes
+class Account(BaseModelPeewee):
+    id = AutoField(primary_key=True)  # Clé primaire auto-incrémentée
+    name = CharField(max_length=100, null=False)
+    balance = FloatField(default=0.0)
+
+# Modèle pour les transactions
+class Transaction(BaseModelPeewee):
+    id = TextField(primary_key=True)  # UUID en texte
+    sender = ForeignKeyField(Account, backref='sent_transactions')  # Compte émetteur
+    receiver = ForeignKeyField(Account, backref='received_transactions')  # Compte destinataire
+    amount = FloatField(null=False)
+    status = CharField(max_length=20, null=False)  # pending, completed, cancelled
+    timestamp = DateTimeField(default=datetime.now)  # Date de création
+
+# Modèle pour les dépôts
+class Deposit(BaseModelPeewee):
+    id = AutoField(primary_key=True)
+    account = ForeignKeyField(Account, backref='deposits')
+    amount = FloatField(null=False)
+    timestamp = DateTimeField(default=datetime.now)
+
+# --- Initialisation de la BDD ---
+def init_db():
+    db.connect()
+    db.create_tables([Account, Transaction, Deposit], safe=True)  # safe=True évite les erreurs si les tables existent déjà
+
+    # Ajoute les comptes initiaux s'ils n'existent pas
+    if not Account.select().where(Account.id == 1).exists():
+        Account.create(id=1, name="Enzo", balance=1000.0)
+    if not Account.select().where(Account.id == 2).exists():
+        Account.create(id=2, name="Bertrand", balance=500.0)
+    if not Account.select().where(Account.id == 3).exists():
+        Account.create(id=3, name="Charles", balance=200.0)
+    print("Database 'bdd.db' successfully initialized !")
 
 accounts = {
     1: Account(id=1, name="Alice", solde=1000.0),
@@ -31,10 +67,11 @@ dépot = []
 
 @app.get("/account/{account_id}")
 def get_account(account_id: int):
-    account = accounts.get(account_id)
-    if account:
-        return {"name": account.name, "solde": account.solde}
-    return {"message": "Account not found"}
+    try:
+        account = Account.get(Account.id == account_id)
+        return {"name": account.name, "balance": account.balance}
+    except Account.DoesNotExist:
+        return {"message": "Account not found"}
 
 @app.get("/account/{account_id}/transactions")
 def get_all_account_transactions(account_id: int):
@@ -61,53 +98,102 @@ def get_account_transaction(transaction_id: str):
 
 @app.post("/transfer/")
 def envoie(account_id1: int, account_id2: int, amount: float):
-    acc1 = accounts.get(account_id1)
-    acc2 = accounts.get(account_id2)
-    if acc1 and acc2 and acc1 != acc2 and amount > 0:
-        if acc1.solde >= amount:
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            transaction_id = str(uuid.uuid4())
-            new_transactions[transaction_id] = {"id1": acc1.id, "id2": acc2.id, "amount": amount, "timestamp": timestamp, "status": "pending"}
-            acc1.solde -= amount
-            threading.Timer(5.0, send_amount, args=(transaction_id, acc1, acc2, amount)).start()
-            return {"message": f"Transfer of {amount} from {acc1.name} to {acc2.name} initiated", "transaction_id": transaction_id, "new_solde": acc1.solde}
+    if amount <= 0:
+        return {"message": "Amount must be positive"}
+
+    try:
+        acc1 = Account.get(Account.id == account_id1)
+        acc2 = Account.get(Account.id == account_id2)
+    except Account.DoesNotExist:
+        return {"message": "Invalid account(s)"}
+
+    if acc1.id == acc2.id:
+        return {"message": "Cannot transfer to the same account"}
+
+    if acc1.balance < amount:
         return {"message": "Insufficient funds"}
-    return {"message": "Invalid account(s) or amount"}
 
-def send_amount(transaction_id, acc1, acc2, amount):
-    if transaction_id in new_transactions:
-        acc2.solde += amount
-        transactions[transaction_id] = new_transactions[transaction_id]
-        del new_transactions[transaction_id]
+    # Crée la transaction en "pending"
+    transaction_id = str(uuid.uuid4())
+    Transaction.create(
+        id=transaction_id,
+        sender=acc1,
+        receiver=acc2,
+        amount=amount,
+        status="pending",
+        timestamp=datetime.now()
+    )
 
-    
+    # Débit le compte émetteur
+    acc1.balance -= amount
+    acc1.save()
+
+    # Planifie la complétion après 5 secondes
+    threading.Timer(5.0, send_amount, args=(transaction_id, acc1.id, acc2.id, amount)).start()
+
+    return {
+        "message": f"Transfer of {amount} from {acc1.name} to {acc2.name} initiated",
+        "transaction_id": transaction_id,
+        "new_balance": acc1.balance
+    }
+
+def send_amount(transaction_id: str, sender_id: int, receiver_id: int, amount: float):
+    """Fonction appelée par le Timer pour finaliser un transfert après 5 secondes."""
+    with db.atomic():  # Transaction SQL pour éviter les incohérences
+        try:
+            # Vérifie que la transaction existe et est toujours en "pending"
+            t = Transaction.get((Transaction.id == transaction_id) & (Transaction.status == "pending"))
+            acc1 = Account.get(Account.id == sender_id)
+            acc2 = Account.get(Account.id == receiver_id)
+
+            # Crédite le compte receveur
+            acc2.balance += amount
+            acc2.save()
+
+            # Met à jour le statut de la transaction
+            t.status = "completed"
+            t.save()
+        except (Transaction.DoesNotExist, Account.DoesNotExist):
+            pass  # La transaction a déjà été annulée ou complétée
 
 @app.post("/deposit/")
 def depot(account_id: int, amount: float):
-    acc = accounts.get(account_id)
-    if acc and amount > 0:
-        acc.solde += amount
-        dépot.append({"account_id": account_id, "amount": amount})
-        return {"message": f"Deposited {amount} to {acc.name}'s account", "new_solde": acc.solde, "depot_history": dépot}
-    return {"message": "Invalid account or amount"}
+    if amount <= 0:
+        return {"message": "Invalid amount"}
 
-@app.post("/complete/")
-def complete_transaction():
-    tmp = []
-    for k, v in new_transactions.items():
-        if datetime.now() - datetime.fromisoformat(v["timestamp"]) >= timedelta(seconds=5):
-            transactions[k] = new_transactions[k]
-            transactions[k]["status"] = "completed"
-            tmp.append(k)
-    for k in tmp:
-        del new_transactions[k]
+    try:
+        acc = Account.get(Account.id == account_id)
+    except Account.DoesNotExist:
+        return {"message": "Invalid account"}
+
+    # Ajoute le montant au balance
+    acc.balance += amount
+    acc.save()
+
+    # Enregistre le dépôt dans l'historique
+    Deposit.create(account=acc, amount=amount, timestamp=datetime.now())
+
+    return {
+        "message": f"Deposited {amount} to {acc.name}'s account",
+        "new_balance": acc.balance
+    }
 
 @app.post("/transactions/{transaction_id}/cancel")
 def cancel_transaction(transaction_id: str):
-    if transaction_id in new_transactions:
-        acc = new_transactions[transaction_id]["id1"]
-        amount = new_transactions[transaction_id]["amount"]
-        accounts[acc].solde += amount
-        del new_transactions[transaction_id]
-        return {"message": f"Transaction {transaction_id} canceled"}
-    return {"message": "Transaction not found or already completed"}
+    """Annule une transaction en attente et rend les fonds au compte émetteur."""
+    with db.atomic():
+        try:
+            t = Transaction.get((Transaction.id == transaction_id) & (Transaction.status == "pending"))
+            sender = t.sender
+
+            # Annule la transaction : crédite le compte émetteur
+            sender.balance += t.amount
+            sender.save()
+
+            # Met à jour le statut
+            t.status = "cancelled"
+            t.save()
+
+            return {"message": f"Transaction {transaction_id} canceled"}
+        except Transaction.DoesNotExist:
+            return {"message": "Transaction not found or already completed"}
