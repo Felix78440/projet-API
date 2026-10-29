@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+.venv/
+**/.venv/
+__pycache__/
+*.py[cod]
+bank-api-develop/**/bank.db*
